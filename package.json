@@ -1,0 +1,39 @@
+{
+  "name": "lambda-pdf-processing",
+  "version": "1.0.0",
+  "description": "AWS Lambda function for PDF and image text extraction",
+  "main": "index.mjs",
+  "type": "module",
+  "scripts": {
+    "run": "node run.mjs",
+    "zip": "zip -r function.zip node_modules index.mjs",
+    "deploy": "bash deploy.sh"
+  },
+  "keywords": [
+    "pdf",
+    "ocr",
+    "text-extraction",
+    "aws-lambda"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "aws-sdk": "^2.1478.0",
+    "canvas": "^2.11.2",
+    "pdf-parse": "^1.1.1",
+    "sharp": "^0.32.6",
+    "tesseract.js": "2.1.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "lambda": {
+    "dependencies": {
+      "aws-sdk": "^2.1478.0",
+      "sharp": "^0.32.6",
+      "tesseract.js": "2.1.1",
+      "pdfjs-dist": "^2.16.105",
+      "canvas": "^2.11.2"
+    }
+  }
+}

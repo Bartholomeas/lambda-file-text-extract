@@ -1,0 +1,7 @@
+node_modules
+results
+deploy.sh
+**/*.txt
+**/*.pdf
+**/*.jpg
+run.mjs
