@@ -1,23 +1,49 @@
-import sharp from 'sharp';
-import Tesseract from 'tesseract.js';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import sharp from 'sharp';
+import { createWorker } from 'tesseract.js';
 import * as parsePdf from 'pdf-parse/lib/pdf-parse.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const TesseractWorkerSingleton = (function () {
+  let instance = null;
+  let initializingPromise = null;
 
-const tesseractConfig = {
-  lang: 'eng+pol',
-  oem: 1,
-  psm: 3,
-};
+  return {
+    getInstance: async function () {
+      if (instance) return instance;
+
+      if (!initializingPromise) {
+        console.log('Initializing Tesseract worker...');
+        initializingPromise = createWorker(['eng', 'pol'], {
+          cacheMethod: 'memory',
+        });
+        try {
+          instance = await initializingPromise;
+        } catch (err) {
+          initializingPromise = null;
+          throw err;
+        }
+      } else {
+        await initializingPromise;
+      }
+
+      return instance;
+    },
+
+    terminateInstance: async function () {
+      if (instance) {
+        console.log('Terminating Tesseract worker...');
+        await instance.terminate();
+        instance = null;
+        initializingPromise = null;
+      }
+    },
+  };
+})();
 
 /**
  * @typedef {Object} FileInput
  * @property {string} [fileBuffer] - Base64 encoded file content (for AWS Lambda)
- * @property {string} [filePath] - Local file path (for local testing)
  * @property {string} filename - Name of the file
  * @property {string} contentType - MIME type of the file
  */
@@ -31,37 +57,33 @@ const tesseractConfig = {
 export const handler = async event => {
   console.time('processingFiles');
   try {
-    const resultsDir = path.join(__dirname, 'results');
-    if (!fs.existsSync(resultsDir)) {
-      fs.mkdirSync(resultsDir, { recursive: true });
-    }
-    if (!event?.files?.length)
+    const { files } = event;
+    // const resultsDir = path.join(__dirname, 'results');
+    // if (!fs.existsSync(resultsDir)) {
+    //   fs.mkdirSync(resultsDir, { recursive: true });
+    // }
+
+    if (!files?.length) {
       return {
         statusCode: 200,
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: 'No files have been passed to processing.',
           results: [],
         }),
       };
-
-    let files = event.files;
-
-    const operations = [];
-    for (const file of files) {
-      operations.push(processFile(file));
     }
 
+    console.log(`Processing ${files.length} files...`);
+    const operations = files.map(file => processFile(file));
     const results = await Promise.all(operations);
+
+    await TesseractWorkerSingleton.terminateInstance();
 
     console.timeEnd('processingFiles');
     return {
       statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: 'Text extraction completed',
         results: results,
@@ -69,12 +91,13 @@ export const handler = async event => {
     };
   } catch (err) {
     console.error('Error processing files:', err);
+
+    await TesseractWorkerSingleton.terminateInstance();
+
     console.timeEnd('processingFiles');
     return {
       statusCode: 500,
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: 'Error processing files',
         error: err.message,
@@ -90,17 +113,16 @@ export const handler = async event => {
  */
 async function processFile(fileInput) {
   try {
-    let fileBuffer;
+    let fileBuffer = Buffer.from(fileInput.fileBuffer, 'base64');
 
-    // Support both fileBuffer (for AWS Lambda) and filePath (for local testing)
-    if (fileInput.fileBuffer) {
-      fileBuffer = Buffer.from(fileInput.fileBuffer, 'base64');
-    } else if (fileInput.filePath) {
-      // Just for local development
-      fileBuffer = fs.readFileSync(fileInput.filePath);
-    } else {
-      throw new Error('Missing required field: fileBuffer or filePath');
-    }
+    // if (fileInput.fileBuffer) {
+    //   fileBuffer = Buffer.from(fileInput.fileBuffer, 'base64');
+    // } else if (fileInput.filePath) {
+    //   // Just for local development
+    //   fileBuffer = fs.readFileSync(fileInput.filePath);
+    // } else {
+    //   throw new Error('Missing required field: fileBuffer or filePath');
+    // }
 
     const filename = fileInput.filename || 'document';
     const contentType = fileInput.contentType || determineMimeType(fileBuffer);
@@ -135,40 +157,30 @@ async function processFile(fileInput) {
 
 async function performOcrOnImage(imageBuffer, filename) {
   try {
-    // Process image with sharp for better OCR results
+    const worker = await TesseractWorkerSingleton.getInstance();
     const processedImageBuffer = await sharp(imageBuffer).greyscale().normalize().toBuffer();
 
-    // Create a unique identifier for the file
-    const timestamp = Date.now();
-    const randomId = Math.random().toString(36).substring(2, 8);
-    const safeFilename = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    // const timestamp = Date.now();
+    // const randomId = Math.random().toString(36).substring(2, 8);
+    // const safeFilename = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    // const tempFilePath = path.join(__dirname, 'results', `temp_${timestamp}_${randomId}_${safeFilename}.jpg`);
 
-    // Create a temporary file for the image with a unique name
-    const tempFilePath = path.join(__dirname, `temp_${timestamp}_${randomId}_${safeFilename}.jpg`);
+    const { data } = await worker.recognize(processedImageBuffer);
 
-    await fs.promises.writeFile(tempFilePath, processedImageBuffer);
+    console.log(`OCR completed for: ${filename}`);
 
-    try {
-      // Use Tesseract.js for OCR
-      const { data } = await Tesseract.recognize(tempFilePath, 'eng+pol');
+    // const resultsDir = path.join(__dirname, 'results');
+    // const resultsPath = path.join(resultsDir, `ocr_text_${timestamp}_${randomId}_${safeFilename}.txt`);
+    // // const resultsPath = path.join(resultsDir, `ocr_text_${timestamp}_${randomId}_${safeFilename}.txt`);
+    // fs.writeFileSync(resultsPath, data.text || '');
 
-      // Save OCR results to a file as well
-      const resultsDir = path.join(__dirname, 'results');
-      if (!fs.existsSync(resultsDir)) {
-        fs.mkdirSync(resultsDir, { recursive: true });
-      }
+    // if (fs.existsSync(tempFilePath)) {
+    //   fs.unlinkSync(tempFilePath);
+    // }
 
-      const resultsPath = path.join(resultsDir, `ocr_text_${timestamp}_${randomId}_${safeFilename}.txt`);
-      fs.writeFileSync(resultsPath, data.text || '');
-
-      return data.text;
-    } finally {
-      // Clean up the temporary file
-      if (fs.existsSync(tempFilePath)) {
-        await fs.promises.unlink(tempFilePath);
-      }
-    }
+    return data.text;
   } catch (error) {
+    console.error(`OCR processing error: ${error.message}`);
     throw error;
   }
 }
@@ -178,16 +190,17 @@ async function performOcrOnPdf(pdfBuffer, filename) {
     const data = await parsePdf.default(pdfBuffer);
     const extractedText = data?.text;
 
-    const timestamp = Date.now();
-    const randomId = crypto.randomUUID();
+    // const timestamp = Date.now();
+    // const randomId = Math.random().toString(36).substring(2, 8);
+    // const safeFilename = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
 
-    const resultsDir = path.join(__dirname, 'results');
-    if (!fs.existsSync(resultsDir)) {
-      fs.mkdirSync(resultsDir, { recursive: true });
-    }
+    // const resultsDir = path.join(__dirname, 'results');
+    // if (!fs.existsSync(resultsDir)) {
+    //   fs.mkdirSync(resultsDir, { recursive: true });
+    // }
 
-    const tempFilePath = path.join(resultsDir, `pdf_text_${timestamp}_${randomId}.txt`);
-    fs.writeFileSync(tempFilePath, extractedText || '');
+    // const tempFilePath = path.join(resultsDir, `pdf_text_${timestamp}_${randomId}_${safeFilename}.txt`);
+    // fs.writeFileSync(tempFilePath, extractedText || '');
 
     return extractedText;
   } catch (error) {
