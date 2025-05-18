@@ -58,19 +58,13 @@ export const handler = async event => {
   console.time('processingFiles');
   try {
     const { files } = event;
-    // const resultsDir = path.join(__dirname, 'results');
-    // if (!fs.existsSync(resultsDir)) {
-    //   fs.mkdirSync(resultsDir, { recursive: true });
-    // }
 
     if (!files?.length) {
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: 'No files have been passed to processing.',
-          results: [],
-        }),
+        message: 'No files have been passed to processing.',
+        body: [],
       };
     }
 
@@ -84,10 +78,8 @@ export const handler = async event => {
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: 'Text extraction completed',
-        results: results,
-      }),
+      message: 'Text extraction completed',
+      body: results ?? [],
     };
   } catch (err) {
     console.error('Error processing files:', err);
@@ -98,10 +90,8 @@ export const handler = async event => {
     return {
       statusCode: 500,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: 'Error processing files',
-        error: err.message,
-      }),
+      message: err?.message ?? 'Error processing file.',
+      body: [],
     };
   }
 };
@@ -114,15 +104,6 @@ export const handler = async event => {
 async function processFile(fileInput) {
   try {
     let fileBuffer = Buffer.from(fileInput.fileBuffer, 'base64');
-
-    // if (fileInput.fileBuffer) {
-    //   fileBuffer = Buffer.from(fileInput.fileBuffer, 'base64');
-    // } else if (fileInput.filePath) {
-    //   // Just for local development
-    //   fileBuffer = fs.readFileSync(fileInput.filePath);
-    // } else {
-    //   throw new Error('Missing required field: fileBuffer or filePath');
-    // }
 
     const filename = fileInput.filename || 'document';
     const contentType = fileInput.contentType || determineMimeType(fileBuffer);
@@ -160,23 +141,9 @@ async function performOcrOnImage(imageBuffer, filename) {
     const worker = await TesseractWorkerSingleton.getInstance();
     const processedImageBuffer = await sharp(imageBuffer).greyscale().normalize().toBuffer();
 
-    // const timestamp = Date.now();
-    // const randomId = Math.random().toString(36).substring(2, 8);
-    // const safeFilename = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    // const tempFilePath = path.join(__dirname, 'results', `temp_${timestamp}_${randomId}_${safeFilename}.jpg`);
-
     const { data } = await worker.recognize(processedImageBuffer);
 
     console.log(`OCR completed for: ${filename}`);
-
-    // const resultsDir = path.join(__dirname, 'results');
-    // const resultsPath = path.join(resultsDir, `ocr_text_${timestamp}_${randomId}_${safeFilename}.txt`);
-    // // const resultsPath = path.join(resultsDir, `ocr_text_${timestamp}_${randomId}_${safeFilename}.txt`);
-    // fs.writeFileSync(resultsPath, data.text || '');
-
-    // if (fs.existsSync(tempFilePath)) {
-    //   fs.unlinkSync(tempFilePath);
-    // }
 
     return data.text;
   } catch (error) {
@@ -189,18 +156,6 @@ async function performOcrOnPdf(pdfBuffer, filename) {
   try {
     const data = await parsePdf.default(pdfBuffer);
     const extractedText = data?.text;
-
-    // const timestamp = Date.now();
-    // const randomId = Math.random().toString(36).substring(2, 8);
-    // const safeFilename = filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
-
-    // const resultsDir = path.join(__dirname, 'results');
-    // if (!fs.existsSync(resultsDir)) {
-    //   fs.mkdirSync(resultsDir, { recursive: true });
-    // }
-
-    // const tempFilePath = path.join(resultsDir, `pdf_text_${timestamp}_${randomId}_${safeFilename}.txt`);
-    // fs.writeFileSync(tempFilePath, extractedText || '');
 
     return extractedText;
   } catch (error) {

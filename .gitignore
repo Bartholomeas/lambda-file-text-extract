@@ -5,3 +5,6 @@ deploy.sh
 **/*.pdf
 **/*.jpg
 run.mjs
+eng.traineddata
+function.zip
+pol.traineddata
